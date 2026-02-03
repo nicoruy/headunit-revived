@@ -19,6 +19,7 @@ build/
 
 # Local configuration file (sdk path, etc)
 local.properties
+secrets.properties
 
 # android_openssl folder
 android_openssl/
@@ -66,7 +67,11 @@ java_*.hprof
 
 todos.txt
 
+openauto/
 bug/
+WirelessAndroidAutoDongle/
+TestImported
+test_files
 headunit-revived/
+headunit-revived.wiki/
 user_logs
-deploy_old_tablet.sh
