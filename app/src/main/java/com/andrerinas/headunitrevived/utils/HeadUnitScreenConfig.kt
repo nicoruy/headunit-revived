@@ -3,6 +3,7 @@ package com.andrerinas.headunitrevived.utils
 import android.content.Context
 import android.os.Build
 import android.util.DisplayMetrics
+import android.view.WindowManager
 import com.andrerinas.headunitrevived.aap.protocol.proto.Control
 import kotlin.math.roundToInt
 
@@ -12,12 +13,10 @@ object HeadUnitScreenConfig {
     private var screenHeightPx: Int = 0
     private var density: Float = 1.0f
     private var densityDpi: Int = 240
-    private var scaleFactor: Float = 1.0f
-    private var isSmallScreen: Boolean = true
-    private var isPortraitScaled: Boolean = false
-    private var isInitialized: Boolean = false // New flag
+    private var isInitialized: Boolean = false
+
     var negotiatedResolutionType: Control.Service.MediaSinkService.VideoConfiguration.VideoCodecResolutionType? = null
-    private lateinit var currentSettings: Settings // Store settings instance
+    private lateinit var currentSettings: Settings
 
     // System Insets (Bars/Cutouts)
     var systemInsetLeft: Int = 0
@@ -33,40 +32,43 @@ object HeadUnitScreenConfig {
     private var realScreenWidthPx: Int = 0
     private var realScreenHeightPx: Int = 0
 
-
     fun init(context: Context, displayMetrics: DisplayMetrics, settings: Settings) {
-        val screenWidth: Int
-        val screenHeight: Int
-
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) { // API 30+
-            val windowManager = context.getSystemService(android.view.WindowManager::class.java)
+        val windowManager = context.getSystemService(Context.WINDOW_SERVICE) as WindowManager
+        val (screenWidth, screenHeight) = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
             val bounds = windowManager.currentWindowMetrics.bounds
-            screenWidth = bounds.width()
-            screenHeight = bounds.height()
-        } else { // Older APIs
-            @Suppress("DEPRECATION")
-            val windowManager = context.getSystemService(Context.WINDOW_SERVICE) as android.view.WindowManager
-            val display = windowManager.defaultDisplay
+            bounds.width() to bounds.height()
+        } else {
             val size = android.graphics.Point()
             @Suppress("DEPRECATION")
-            display.getRealSize(size)
-            screenWidth = size.x
-            screenHeight = size.y
+            windowManager.defaultDisplay.getRealSize(size)
+            size.x to size.y
         }
 
-        // Only update if dimensions or settings changed (and we are already initialized)
-        if (isInitialized && realScreenWidthPx == screenWidth && realScreenHeightPx == screenHeight && this::currentSettings.isInitialized && currentSettings == settings) {
+        if (isInitialized && realScreenWidthPx == screenWidth && realScreenHeightPx == screenHeight &&
+            this::currentSettings.isInitialized && currentSettings == settings) {
             return
         }
 
         isInitialized = true
         currentSettings = settings
-
         realScreenWidthPx = screenWidth
         realScreenHeightPx = screenHeight
         density = displayMetrics.density
         densityDpi = displayMetrics.densityDpi
-        
+
+        recalculate()
+    }
+
+    /**
+     * Updates the usable screen area based on the actual measured view dimensions.
+     * This ensures scaling and touch mapping are perfectly synchronized.
+     */
+    fun setActualUsableArea(width: Int, height: Int) {
+        if (screenWidthPx == width && screenHeightPx == height) return
+        AppLog.i("HeadUnitScreenConfig: Updating usable area to actual view size: ${width}x$height")
+        screenWidthPx = width
+        screenHeightPx = height
+        // Trigger a recalculation of the negotiated resolution when the view size changes
         recalculate()
     }
 
@@ -86,146 +88,166 @@ object HeadUnitScreenConfig {
     }
 
     private fun recalculate() {
-        // Calculate USABLE area
-        screenWidthPx = realScreenWidthPx - systemInsetLeft - systemInsetRight
-        screenHeightPx = realScreenHeightPx - systemInsetTop - systemInsetBottom
+        // If we haven't been explicitly told the view size, calculate it based on screen and insets
+        if (screenWidthPx == 0 || screenHeightPx == 0) {
+            screenWidthPx = realScreenWidthPx - systemInsetLeft - systemInsetRight
+            screenHeightPx = realScreenHeightPx - systemInsetTop - systemInsetBottom
+        }
 
         if (screenWidthPx <= 0 || screenHeightPx <= 0) {
-            // Fallback to raw if calculation fails or leads to 0
             screenWidthPx = realScreenWidthPx
             screenHeightPx = realScreenHeightPx
         }
         
-        AppLog.i("CarScreen: usable width: $screenWidthPx height: $screenHeightPx (Raw: ${realScreenWidthPx}x${realScreenHeightPx}, Insets: L$systemInsetLeft T$systemInsetTop R$systemInsetRight B$systemInsetBottom)")
+        AppLog.i("HeadUnitScreenConfig: Calculated usable area: ${screenWidthPx}x$screenHeightPx")
 
-        // check if small screen
-        if (screenHeightPx > screenWidthPx) { // Portrait mode
-            if (screenWidthPx > 1080 || screenHeightPx > 1920) {
-                isSmallScreen = false
+        val selectedRes = Settings.Resolution.fromId(currentSettings.resolutionId)
+
+        if (selectedRes == Settings.Resolution.AUTO || selectedRes == null) {
+            negotiatedResolutionType = selectBestResolution(screenWidthPx, screenHeightPx)
+        } else {
+            negotiatedResolutionType = selectedRes.codec
+        }
+
+        AppLog.i("HeadUnitScreenConfig: Negotiated resolution: $negotiatedResolutionType (${getNegotiatedWidth()}x${getNegotiatedHeight()})")
+    }
+
+    private fun selectBestResolution(width: Int, height: Int): Control.Service.MediaSinkService.VideoConfiguration.VideoCodecResolutionType {
+        val isPortrait = height > width
+        return if (isPortrait) {
+            when {
+                width >= 1440 && height >= 2560 -> Control.Service.MediaSinkService.VideoConfiguration.VideoCodecResolutionType._1440x2560
+                width >= 1080 && height >= 1920 -> Control.Service.MediaSinkService.VideoConfiguration.VideoCodecResolutionType._1080x1920
+                else -> Control.Service.MediaSinkService.VideoConfiguration.VideoCodecResolutionType._720x1280
             }
         } else {
-            if (screenWidthPx > 1920 || screenHeightPx > 1080) {
-                isSmallScreen = false
+            when {
+                width >= 2560 && height >= 1440 -> Control.Service.MediaSinkService.VideoConfiguration.VideoCodecResolutionType._2560x1440
+                width >= 1920 && height >= 1080 -> Control.Service.MediaSinkService.VideoConfiguration.VideoCodecResolutionType._1920x1080
+                width >= 1280 && height >= 720 -> Control.Service.MediaSinkService.VideoConfiguration.VideoCodecResolutionType._1280x720
+                else -> Control.Service.MediaSinkService.VideoConfiguration.VideoCodecResolutionType._800x480
             }
         }
-
-        val selectedResolution = Settings.Resolution.fromId(currentSettings.resolutionId)
-
-        // Determine negotiatedResolutionType based on physical pixels if AUTO was selected
-        if (selectedResolution == Settings.Resolution.AUTO) {
-            if (screenHeightPx > screenWidthPx) { // Portrait mode
-                if (screenWidthPx > 720 || screenHeightPx > 1280) {
-                    negotiatedResolutionType = Control.Service.MediaSinkService.VideoConfiguration.VideoCodecResolutionType._1080x1920
-                } else {
-                    negotiatedResolutionType = Control.Service.MediaSinkService.VideoConfiguration.VideoCodecResolutionType._720x1280
-                }
-            } else { // Landscape mode
-                if (screenWidthPx <= 800 && screenHeightPx <= 480) {
-                    negotiatedResolutionType = Control.Service.MediaSinkService.VideoConfiguration.VideoCodecResolutionType._800x480
-                } else if ((screenWidthPx >= 2560 || screenHeightPx >= 1440) && com.andrerinas.headunitrevived.decoder.VideoDecoder.isHevcSupported() && Build.VERSION.SDK_INT >= 24) {
-                    negotiatedResolutionType = Control.Service.MediaSinkService.VideoConfiguration.VideoCodecResolutionType._2560x1440
-                } else if (screenWidthPx > 1280 || screenHeightPx > 720) {
-                    negotiatedResolutionType = Control.Service.MediaSinkService.VideoConfiguration.VideoCodecResolutionType._1920x1080
-                } else {
-                    negotiatedResolutionType = Control.Service.MediaSinkService.VideoConfiguration.VideoCodecResolutionType._1280x720
-                }
-            }
-        } else {
-            // Manual selection: Adapt to orientation
-            if (screenHeightPx > screenWidthPx) { // Portrait
-                negotiatedResolutionType = when (selectedResolution) {
-                    Settings.Resolution._800x480 -> Control.Service.MediaSinkService.VideoConfiguration.VideoCodecResolutionType._720x1280 // Upgrade to 720p Port
-                    Settings.Resolution._1280x720 -> Control.Service.MediaSinkService.VideoConfiguration.VideoCodecResolutionType._720x1280
-                    Settings.Resolution._1920x1080 -> Control.Service.MediaSinkService.VideoConfiguration.VideoCodecResolutionType._1080x1920
-                    Settings.Resolution._2560x1440 -> Control.Service.MediaSinkService.VideoConfiguration.VideoCodecResolutionType._1440x2560
-                    else -> selectedResolution?.codec
-                }
-            } else {
-                negotiatedResolutionType = selectedResolution?.codec
-            }
-        }
-
-        if (!isSmallScreen) {
-            val sWidth = screenWidthPx.toFloat()
-            val sHeight = screenHeightPx.toFloat()
-            if (getNegotiatedWidth() > 0 && getNegotiatedHeight() > 0) { // Ensure division by zero is avoided
-                 if (sWidth / sHeight < getAspectRatio()) {
-                    isPortraitScaled = true
-                    scaleFactor = (sHeight * 1.0f) / getNegotiatedHeight().toFloat()
-                } else {
-                    isPortraitScaled = false
-                    scaleFactor = (sWidth * 1.0f) / getNegotiatedWidth().toFloat()
-                }
-            } else {
-                scaleFactor = 1.0f // Default if negotiated resolution is not valid
-            }
-        }
-        AppLog.i("CarScreen isSmallScreen: $isSmallScreen, scaleFactor: ${scaleFactor}")
-        AppLog.i("CarScreen using: $negotiatedResolutionType, number: ${negotiatedResolutionType?.number}, scales: scaleX: ${getScaleX()}, scaleY: ${getScaleY()}")
     }
 
-    fun getAdjustedHeight(): Int {
-        return (getNegotiatedHeight() * scaleFactor).roundToInt()
+    fun getNegotiatedWidth(): Int = when (negotiatedResolutionType) {
+        Control.Service.MediaSinkService.VideoConfiguration.VideoCodecResolutionType._800x480 -> 800
+        Control.Service.MediaSinkService.VideoConfiguration.VideoCodecResolutionType._1280x720 -> 1280
+        Control.Service.MediaSinkService.VideoConfiguration.VideoCodecResolutionType._1920x1080 -> 1920
+        Control.Service.MediaSinkService.VideoConfiguration.VideoCodecResolutionType._2560x1440 -> 2560
+        Control.Service.MediaSinkService.VideoConfiguration.VideoCodecResolutionType._720x1280 -> 720
+        Control.Service.MediaSinkService.VideoConfiguration.VideoCodecResolutionType._1080x1920 -> 1080
+        Control.Service.MediaSinkService.VideoConfiguration.VideoCodecResolutionType._1440x2560 -> 1440
+        else -> 800
     }
 
-    fun getAdjustedWidth(): Int {
-        return (getNegotiatedWidth() * scaleFactor).roundToInt()
+    fun getNegotiatedHeight(): Int = when (negotiatedResolutionType) {
+        Control.Service.MediaSinkService.VideoConfiguration.VideoCodecResolutionType._800x480 -> 480
+        Control.Service.MediaSinkService.VideoConfiguration.VideoCodecResolutionType._1280x720 -> 720
+        Control.Service.MediaSinkService.VideoConfiguration.VideoCodecResolutionType._1920x1080 -> 1080
+        Control.Service.MediaSinkService.VideoConfiguration.VideoCodecResolutionType._2560x1440 -> 1440
+        Control.Service.MediaSinkService.VideoConfiguration.VideoCodecResolutionType._720x1280 -> 1280
+        Control.Service.MediaSinkService.VideoConfiguration.VideoCodecResolutionType._1080x1920 -> 1920
+        Control.Service.MediaSinkService.VideoConfiguration.VideoCodecResolutionType._1440x2560 -> 2560
+        else -> 480
     }
 
-    private fun getAspectRatio(): Float {
-        return getNegotiatedWidth().toFloat() / getNegotiatedHeight().toFloat()
-    }
-
-    fun getNegotiatedHeight(): Int {
-        val resString = negotiatedResolutionType.toString().replace("_", "")
-        return resString.split("x")[1].toInt()
-    }
-
-    fun getNegotiatedWidth(): Int {
-        val resString = negotiatedResolutionType.toString().replace("_", "")
-        return resString.split("x")[0].toInt()
-    }
-
-    fun getHeightMargin(): Int {
-        val margin = ((getAdjustedHeight() - screenHeightPx) / scaleFactor).roundToInt()
-        return margin.coerceAtLeast(0)
-    }
-
+    /**
+     * Calculates the width margin to send to the phone.
+     * This helps the phone's UI fill the entire available screen width.
+     */
     fun getWidthMargin(): Int {
-        val margin = ((getAdjustedWidth() - screenWidthPx) / scaleFactor).roundToInt()
-        return margin.coerceAtLeast(0)
+        val nWidth = getNegotiatedWidth()
+        val nHeight = getNegotiatedHeight()
+        val sWidth = screenWidthPx
+        val sHeight = screenHeightPx
+
+        val scale = Math.min(sWidth.toFloat() / nWidth, sHeight.toFloat() / nHeight)
+        val displayedWidth = (nWidth * scale).toInt()
+
+        // If we are pillarboxing (bars on sides), we should tell the phone to use a wider area
+        if (displayedWidth < sWidth) {
+            val neededNWidth = (sWidth / scale).toInt()
+            return ((neededNWidth - nWidth) / 2).coerceAtLeast(0)
+        }
+        return 0
     }
 
-    private fun divideOrOne(numerator: Float, denominator: Float): Float {
-        return if (denominator == 0.0f) 1.0f else numerator / denominator
+    /**
+     * Calculates the height margin to send to the phone.
+     * This helps the phone's UI fill the entire available screen height.
+     */
+    fun getHeightMargin(): Int {
+        val nWidth = getNegotiatedWidth()
+        val nHeight = getNegotiatedHeight()
+        val sWidth = screenWidthPx
+        val sHeight = screenHeightPx
+
+        val scale = Math.min(sWidth.toFloat() / nWidth, sHeight.toFloat() / nHeight)
+        val displayedHeight = (nHeight * scale).toInt()
+
+        // If we are letterboxing (bars on top/bottom), we should tell the phone to use a taller area
+        if (displayedHeight < sHeight) {
+            val neededNHeight = (sHeight / scale).toInt()
+            return ((neededNHeight - nHeight) / 2).coerceAtLeast(0)
+        }
+        return 0
     }
 
     fun getScaleX(): Float {
-        if (getNegotiatedWidth() > screenWidthPx) {
-            return divideOrOne(getNegotiatedWidth().toFloat(), screenWidthPx.toFloat())
-        }
-        if (isPortraitScaled) {
-            return divideOrOne(getAspectRatio(), (screenWidthPx.toFloat() / screenHeightPx.toFloat()))
-        }
-        return 1.0f
+        val nWidth = getNegotiatedWidth().toDouble()
+        val nHeight = getNegotiatedHeight().toDouble()
+        val sWidth = screenWidthPx.toDouble()
+        val sHeight = screenHeightPx.toDouble()
+
+        if (nWidth == 0.0 || nHeight == 0.0 || sWidth == 0.0 || sHeight == 0.0) return 1.0f
+
+        val scale = Math.min(sWidth / nWidth, sHeight / nHeight)
+        return ((nWidth * scale) / sWidth).toFloat()
     }
 
     fun getScaleY(): Float {
-        if (getNegotiatedHeight() > screenHeightPx) {
-            return divideOrOne(getNegotiatedHeight().toFloat(), screenHeightPx.toFloat())
-        }
-        if (isPortraitScaled) {
-            return 1.0f
-        }
-        return divideOrOne((screenWidthPx.toFloat() / screenHeightPx.toFloat()), getAspectRatio())
+        val nWidth = getNegotiatedWidth().toDouble()
+        val nHeight = getNegotiatedHeight().toDouble()
+        val sWidth = screenWidthPx.toDouble()
+        val sHeight = screenHeightPx.toDouble()
+
+        if (nWidth == 0.0 || nHeight == 0.0 || sWidth == 0.0 || sHeight == 0.0) return 1.0f
+
+        val scale = Math.min(sWidth / nWidth, sHeight / nHeight)
+        return ((nHeight * scale) / sHeight).toFloat()
     }
 
-    fun getDensityWidth(): Int {
-        return (screenWidthPx / density).roundToInt()
+    fun getTouchX(rawX: Float): Int {
+        val nWidth = getNegotiatedWidth().toDouble()
+        val nHeight = getNegotiatedHeight().toDouble()
+        val sWidth = screenWidthPx.toDouble()
+        val sHeight = screenHeightPx.toDouble()
+
+        if (nWidth == 0.0 || nHeight == 0.0 || sWidth == 0.0 || sHeight == 0.0) return 0
+
+        val scale = Math.min(sWidth / nWidth, sHeight / nHeight)
+        val displayedWidth = nWidth * scale
+        val offsetX = (sWidth - displayedWidth) / 2.0
+
+        val correctedX = Math.round((rawX - offsetX) * (nWidth / displayedWidth)).toInt()
+        return correctedX.coerceIn(0, nWidth.toInt() - 1)
     }
 
-    fun getDensityHeight(): Int {
-        return (screenHeightPx / density).roundToInt()
+    fun getTouchY(rawY: Float): Int {
+        val nWidth = getNegotiatedWidth().toDouble()
+        val nHeight = getNegotiatedHeight().toDouble()
+        val sWidth = screenWidthPx.toDouble()
+        val sHeight = screenHeightPx.toDouble()
+
+        if (nWidth == 0.0 || nHeight == 0.0 || sWidth == 0.0 || sHeight == 0.0) return 0
+
+        val scale = Math.min(sWidth / nWidth, sHeight / nHeight)
+        val displayedHeight = nHeight * scale
+        val offsetY = (sHeight - displayedHeight) / 2.0
+
+        val correctedY = Math.round((rawY - offsetY) * (nHeight / displayedHeight)).toInt()
+        return correctedY.coerceIn(0, nHeight.toInt() - 1)
     }
 
     fun getDensityDpi(): Int {
@@ -234,14 +256,5 @@ object HeadUnitScreenConfig {
         } else {
             densityDpi
         }
-    }
-
-    fun getHorizontalCorrection(): Float {
-        return (getNegotiatedWidth() - getWidthMargin()).toFloat() / screenWidthPx.toFloat()
-    }
-
-    fun getVerticalCorrection(): Float {
-        val fIntValue = (getNegotiatedHeight() - getHeightMargin()).toFloat() / screenHeightPx.toFloat()
-        return fIntValue
     }
 }

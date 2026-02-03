@@ -12,20 +12,24 @@ object ProjectionViewScaler {
             return
         }
 
-        // The dimensions of the content area we want to display
         val displayMetrics = view.resources.displayMetrics
-        val contentWidth = displayMetrics.widthPixels
-        val contentHeight = displayMetrics.heightPixels
-
         HeadUnitScreenConfig.init(view.context, displayMetrics, App.provide(view.context).settings)
+        
+        // Ensure touch logic uses the same base dimensions as the video scaling
+        HeadUnitScreenConfig.setActualUsableArea(view.width, view.height)
 
-        // The dimensions of the content area we want to display
-        val finalScaleX = HeadUnitScreenConfig.getScaleX()
-        val finalScaleY = HeadUnitScreenConfig.getScaleY()
+        val screenWidth = view.width.toFloat()
+        val screenHeight = view.height.toFloat()
+
+        // Calculate scale to fit video into screen while maintaining aspect ratio
+        val scale = Math.min(screenWidth / videoWidth, screenHeight / videoHeight)
+        
+        val finalScaleX = (videoWidth * scale) / screenWidth
+        val finalScaleY = (videoHeight * scale) / screenHeight
 
         view.scaleX = finalScaleX
         view.scaleY = finalScaleY
-        AppLog.i("ProjectionViewScaler: Dimensions: Video: ${videoWidth}x$videoHeight, Content: ${contentWidth}x$contentHeight, View: ${view.width}x${view.height}")
-        AppLog.i("ProjectionViewScaler: Scale updated for view ${view.javaClass.simpleName}. scaleX: $finalScaleX, scaleY: $finalScaleY")
+
+        AppLog.i("ProjectionViewScaler: Video: ${videoWidth}x$videoHeight, View: ${view.width}x${view.height}, Scale: $finalScaleX x $finalScaleY")
     }
 }

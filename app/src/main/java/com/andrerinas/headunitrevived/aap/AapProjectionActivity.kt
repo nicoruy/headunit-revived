@@ -286,17 +286,14 @@ class AapProjectionActivity : SurfaceActivity(), IProjectionView.Callbacks, Vide
         val action = TouchEvent.motionEventToAction(event) ?: return
         val ts = SystemClock.elapsedRealtime()
 
-        val horizontalCorrection = HeadUnitScreenConfig.getHorizontalCorrection()
-        val verticalCorrection = HeadUnitScreenConfig.getVerticalCorrection()
-
         val pointerData = mutableListOf<Triple<Int, Int, Int>>()
         repeat(event.pointerCount) { pointerIndex ->
             val pointerId = event.getPointerId(pointerIndex)
-            val x = event.getX(pointerIndex)
-            val y = event.getY(pointerIndex)
+            val rawX = event.getX(pointerIndex)
+            val rawY = event.getY(pointerIndex)
 
-            val correctedX = (x * horizontalCorrection).toInt()
-            val correctedY = (y * verticalCorrection).toInt()
+            val correctedX = HeadUnitScreenConfig.getTouchX(rawX)
+            val correctedY = HeadUnitScreenConfig.getTouchY(rawY)
 
             pointerData.add(Triple(pointerId, correctedX, correctedY))
         }
