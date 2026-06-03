@@ -1,6 +1,5 @@
 package com.andrerinas.headunitrevived.aap.protocol
 
-import android.media.AudioManager
 import android.util.SparseArray
 import com.andrerinas.headunitrevived.aap.protocol.proto.Media
 
@@ -9,16 +8,12 @@ import com.andrerinas.headunitrevived.decoder.AudioDecoder
 object AudioConfigs {
     private val audioTracks = SparseArray<Media.AudioConfiguration>(3)
 
-    fun stream(channel: Int, separateAudioStreams: Boolean = true) : Int
-    {
-        if (separateAudioStreams) {
-            return when(channel) {
-                Channel.ID_AU1 -> AudioManager.STREAM_VOICE_CALL
-                Channel.ID_AU2 -> AudioManager.STREAM_NOTIFICATION
-                else -> AudioManager.STREAM_MUSIC
-            }
+    fun stream(channel: Int, audStreamType: Int, au1StreamType: Int, au2StreamType: Int): Int {
+        return when (channel) {
+            Channel.ID_AU1 -> au1StreamType
+            Channel.ID_AU2 -> au2StreamType
+            else -> audStreamType
         }
-        return AudioManager.STREAM_MUSIC
     }
 
     fun get(channel: Int): Media.AudioConfiguration {

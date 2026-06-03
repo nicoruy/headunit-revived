@@ -317,7 +317,13 @@ internal class AapControlService(
         // Best-effort: request system audio focus to duck other apps on the headunit.
         // The result is intentionally ignored for the protocol response above.
         if (settings.enableAudioSink) {
-            aapAudio.requestFocusChange(AudioConfigs.stream(channel, settings.separateAudioStreams), notification.request.number, AudioManager.OnAudioFocusChangeListener {
+            val sep = settings.separateAudioStreams
+            aapAudio.requestFocusChange(AudioConfigs.stream(
+                channel,
+                if (sep) settings.audStreamType else AudioManager.STREAM_MUSIC,
+                if (sep) settings.au1StreamType else AudioManager.STREAM_MUSIC,
+                if (sep) settings.au2StreamType else AudioManager.STREAM_MUSIC
+            ), notification.request.number, AudioManager.OnAudioFocusChangeListener {
                 AppLog.i("System audio focus changed: $it ${systemFocusName[it]}")
             })
         } else {

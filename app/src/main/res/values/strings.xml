@@ -247,6 +247,10 @@
     <string name="enable_audio_sink_description">If disabled, the headunit will not receive audio. Sound will play from the phone.</string>
     <string name="separate_audio_streams">Separate Audio Streams</string>
     <string name="separate_audio_streams_description">Separate audio channels for music, calls, and notifications instead of a single multimedia stream (may not work correctly on some devices).</string>
+    <string name="aud_stream_type">AUD (Media) Stream</string>
+    <string name="au1_stream_type">AU1 (Speech) Stream</string>
+    <string name="au2_stream_type">AU2 (System) Stream</string>
+    <string name="no_audio_streams_found">No audio streams found</string>
     <string name="use_aac_audio">Use AAC Audio</string>
     <string name="use_aac_audio_description">Use AAC codec for audio to save bandwidth (Experimental).</string>
     <string name="audio_volume_offset">Audio Volume Offset</string>

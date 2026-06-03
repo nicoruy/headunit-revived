@@ -6,6 +6,7 @@ import android.content.Context
 import android.content.SharedPreferences
 import android.content.pm.PackageManager
 import android.location.Location
+import android.media.AudioManager
 import android.os.Build
 import com.andrerinas.headunitrevived.aap.protocol.proto.Control
 import com.andrerinas.headunitrevived.app.UsbAttachedActivity
@@ -373,6 +374,18 @@ class Settings(context: Context) {
     var audioQueueCapacity: Int
         get() = prefs.getInt("audio-queue-capacity", 0)
         set(value) { prefs.edit().putInt("audio-queue-capacity", value).apply() }
+
+    var audStreamType: Int
+        get() = prefs.getInt("aud-stream-type", AudioManager.STREAM_MUSIC)
+        set(value) { prefs.edit().putInt("aud-stream-type", value).apply() }
+
+    var au1StreamType: Int
+        get() = prefs.getInt("au1-stream-type", AudioManager.STREAM_VOICE_CALL)
+        set(value) { prefs.edit().putInt("au1-stream-type", value).apply() }
+
+    var au2StreamType: Int
+        get() = prefs.getInt("au2-stream-type", AudioManager.STREAM_NOTIFICATION)
+        set(value) { prefs.edit().putInt("au2-stream-type", value).apply() }
 
     var useAacAudio: Boolean
         get() = prefs.getBoolean("use-aac-audio", false)

@@ -25,6 +25,7 @@ import com.andrerinas.headunitrevived.main.settings.SettingItem
 import com.andrerinas.headunitrevived.main.settings.SettingsAdapter
 import com.andrerinas.headunitrevived.utils.Settings
 import com.andrerinas.headunitrevived.utils.LocaleHelper
+import com.andrerinas.headunitrevived.utils.StreamDiscovery
 import com.andrerinas.headunitrevived.BuildConfig
 import com.andrerinas.headunitrevived.utils.LogExporter
 import com.google.android.material.appbar.MaterialToolbar
@@ -86,6 +87,12 @@ class SettingsFragment : Fragment() {
     private var pendingMediaVolumeOffset: Int? = null
     private var pendingAssistantVolumeOffset: Int? = null
     private var pendingNavigationVolumeOffset: Int? = null
+
+    private var pendingAudStreamType: Int? = null
+    private var pendingAu1StreamType: Int? = null
+    private var pendingAu2StreamType: Int? = null
+
+    private var discoveredStreams: List<StreamDiscovery.StreamInfo> = emptyList()
 
     private var requiresRestart = false
     private var hasChanges = false
@@ -152,6 +159,14 @@ class SettingsFragment : Fragment() {
         pendingMediaVolumeOffset = settings.mediaVolumeOffset
         pendingAssistantVolumeOffset = settings.assistantVolumeOffset
         pendingNavigationVolumeOffset = settings.navigationVolumeOffset
+
+        pendingAudStreamType = settings.audStreamType
+        pendingAu1StreamType = settings.au1StreamType
+        pendingAu2StreamType = settings.au2StreamType
+
+        if (pendingSeparateAudioStreams == true) {
+            discoveredStreams = StreamDiscovery.discover(requireContext())
+        }
 
         // Intercept system back button
         requireActivity().onBackPressedDispatcher.addCallback(viewLifecycleOwner, object : OnBackPressedCallback(true) {
@@ -261,6 +276,9 @@ class SettingsFragment : Fragment() {
         pendingAssistantVolumeOffset?.let { settings.assistantVolumeOffset = it }
         pendingNavigationVolumeOffset?.let { settings.navigationVolumeOffset = it }
 
+        pendingAudStreamType?.let { settings.audStreamType = it }
+        pendingAu1StreamType?.let { settings.au1StreamType = it }
+        pendingAu2StreamType?.let { settings.au2StreamType = it }
 
         pendingAppLanguage?.let { settings.appLanguage = it }
 
@@ -356,7 +374,10 @@ class SettingsFragment : Fragment() {
                         pendingWifiConnectionMode != settings.wifiConnectionMode ||
                         pendingHelperConnectionStrategy != settings.helperConnectionStrategy ||
                         pendingWaitForWifi != settings.waitForWifiBeforeWifiDirect ||
-                        pendingWaitForWifiTimeout != settings.waitForWifiTimeout
+                        pendingWaitForWifiTimeout != settings.waitForWifiTimeout ||
+                        pendingAudStreamType != settings.audStreamType ||
+                        pendingAu1StreamType != settings.au1StreamType ||
+                        pendingAu2StreamType != settings.au2StreamType
 
         hasChanges = anyChange
 
@@ -958,10 +979,69 @@ class SettingsFragment : Fragment() {
             isChecked = pendingSeparateAudioStreams ?: true,
             onCheckedChanged = { isChecked ->
                 pendingSeparateAudioStreams = isChecked
+                if (isChecked && discoveredStreams.isEmpty()) {
+                    discoveredStreams = StreamDiscovery.discover(requireContext())
+                }
                 checkChanges()
                 updateSettingsList()
             }
         ))
+
+        if (pendingSeparateAudioStreams == true) {
+            val audLabel = discoveredStreams.find { it.id == (pendingAudStreamType ?: settings.audStreamType) }?.label
+                ?: "STREAM_${pendingAudStreamType ?: settings.audStreamType}"
+            items.add(SettingItem.SettingEntry(
+                stableId = "audStreamType",
+                nameResId = R.string.aud_stream_type,
+                value = audLabel,
+                onClick = { _ ->
+                    showStreamPicker(
+                        title = getString(R.string.aud_stream_type),
+                        currentStreamType = pendingAudStreamType ?: settings.audStreamType
+                    ) { streamId ->
+                        pendingAudStreamType = streamId
+                        checkChanges()
+                        updateSettingsList()
+                    }
+                }
+            ))
+
+            val au1Label = discoveredStreams.find { it.id == (pendingAu1StreamType ?: settings.au1StreamType) }?.label
+                ?: "STREAM_${pendingAu1StreamType ?: settings.au1StreamType}"
+            items.add(SettingItem.SettingEntry(
+                stableId = "au1StreamType",
+                nameResId = R.string.au1_stream_type,
+                value = au1Label,
+                onClick = { _ ->
+                    showStreamPicker(
+                        title = getString(R.string.au1_stream_type),
+                        currentStreamType = pendingAu1StreamType ?: settings.au1StreamType
+                    ) { streamId ->
+                        pendingAu1StreamType = streamId
+                        checkChanges()
+                        updateSettingsList()
+                    }
+                }
+            ))
+
+            val au2Label = discoveredStreams.find { it.id == (pendingAu2StreamType ?: settings.au2StreamType) }?.label
+                ?: "STREAM_${pendingAu2StreamType ?: settings.au2StreamType}"
+            items.add(SettingItem.SettingEntry(
+                stableId = "au2StreamType",
+                nameResId = R.string.au2_stream_type,
+                value = au2Label,
+                onClick = { _ ->
+                    showStreamPicker(
+                        title = getString(R.string.au2_stream_type),
+                        currentStreamType = pendingAu2StreamType ?: settings.au2StreamType
+                    ) { streamId ->
+                        pendingAu2StreamType = streamId
+                        checkChanges()
+                        updateSettingsList()
+                    }
+                }
+            ))
+        }
 
         items.add(SettingItem.ToggleSettingEntry(
             stableId = "useAacAudio",
@@ -1195,6 +1275,35 @@ class SettingsFragment : Fragment() {
         settingsAdapter.submitList(items) {
             scrollState?.let { settingsRecyclerView.layoutManager?.onRestoreInstanceState(it) }
         }
+    }
+
+    private fun showStreamPicker(title: String, currentStreamType: Int, onSelected: (Int) -> Unit) {
+        val streams = discoveredStreams
+
+        if (streams.isEmpty()) {
+            MaterialAlertDialogBuilder(requireContext(), R.style.DarkAlertDialog)
+                .setTitle(title)
+                .setMessage(getString(R.string.no_audio_streams_found))
+                .setPositiveButton(android.R.string.ok, null)
+                .show()
+            return
+        }
+
+        val labels = streams.map { "${it.label} (${it.id})" }.toTypedArray()
+        val currentIndex = streams.indexOfFirst { it.id == currentStreamType }.coerceAtLeast(0)
+        var selectedIndex = currentIndex
+
+        MaterialAlertDialogBuilder(requireContext(), R.style.DarkAlertDialog)
+            .setTitle(title)
+            .setSingleChoiceItems(labels, currentIndex) { _, which ->
+                selectedIndex = which
+            }
+            .setPositiveButton(android.R.string.ok) { dialog, _ ->
+                onSelected(streams[selectedIndex].id)
+                dialog.dismiss()
+            }
+            .setNegativeButton(android.R.string.cancel, null)
+            .show()
     }
 
     private fun showAudioOffsetsDialog() {
